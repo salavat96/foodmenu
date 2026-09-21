@@ -1,6 +1,6 @@
 import pytest
 
-from app.services.ai_recipe_service import AIRecipeError, parse_recipe_response
+from app.services.ai_recipe_service import AIRecipeError, DailyQuota, parse_recipe_response
 
 
 def test_parse_valid_response():
@@ -49,3 +49,19 @@ def test_parse_invalid_json_raises():
 def test_parse_missing_required_field_raises():
     with pytest.raises(AIRecipeError):
         parse_recipe_response('{"title": "Блюдо без шагов", "ingredients": [["Х", "1"]], "steps": []}')
+
+
+def test_daily_quota_blocks_after_limit():
+    quota = DailyQuota(max_per_day=2)
+
+    assert quota.check_and_increment(user_id=1)
+    assert quota.check_and_increment(user_id=1)
+    assert not quota.check_and_increment(user_id=1)
+
+
+def test_daily_quota_tracks_users_independently():
+    quota = DailyQuota(max_per_day=1)
+
+    assert quota.check_and_increment(user_id=1)
+    assert not quota.check_and_increment(user_id=1)
+    assert quota.check_and_increment(user_id=2)

@@ -86,7 +86,7 @@ async def handle_search_query(message: Message, state: FSMContext) -> None:
         )
         try:
             draft = await generate_recipe(
-                query, allergies=user.allergies, disliked=user.disliked_products
+                query, user_id=user.id, allergies=user.allergies, disliked=user.disliked_products
             )
         except AIRecipeError as exc:
             await state.clear()

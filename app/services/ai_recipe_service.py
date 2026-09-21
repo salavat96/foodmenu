@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass
+from datetime import date
 
 from anthropic import AsyncAnthropic
 
@@ -85,9 +87,48 @@ def parse_recipe_response(text: str) -> RecipeDraft:
     )
 
 
-async def generate_recipe(query: str, *, allergies: list[str], disliked: list[str]) -> RecipeDraft:
+class DailyQuota:
+    """Дневной лимит запросов к API на пользователя (в памяти процесса).
+
+    Защищает от неожиданного счёта за токены и от того, что один активный
+    пользователь съест весь rate limit провайдера. Сбрасывается при
+    перезапуске бота — для MVP этого достаточно, при росте нагрузки стоит
+    вынести счётчик в Redis/БД.
+    """
+
+    def __init__(self, max_per_day: int) -> None:
+        self.max_per_day = max_per_day
+        self._usage: dict[int, tuple[date, int]] = {}
+
+    def check_and_increment(self, user_id: int) -> bool:
+        today = date.today()
+        last_date, count = self._usage.get(user_id, (today, 0))
+        if last_date != today:
+            count = 0
+
+        if count >= self.max_per_day:
+            self._usage[user_id] = (today, count)
+            return False
+
+        self._usage[user_id] = (today, count + 1)
+        return True
+
+
+_daily_quota = DailyQuota(settings.ai_daily_limit_per_user)
+_concurrency_limiter = asyncio.Semaphore(settings.ai_max_concurrent_requests)
+
+
+async def generate_recipe(
+    query: str, *, user_id: int, allergies: list[str], disliked: list[str]
+) -> RecipeDraft:
     if not settings.anthropic_api_key:
         raise AIRecipeError("Функция генерации рецептов по описанию сейчас не настроена")
+
+    if not _daily_quota.check_and_increment(user_id):
+        raise AIRecipeError(
+            f"Дневной лимит запросов к ИИ ({settings.ai_daily_limit_per_user}) исчерпан, "
+            "попробуй завтра или поищи в готовых категориях"
+        )
 
     constraints = []
     if allergies:
@@ -101,12 +142,13 @@ async def generate_recipe(query: str, *, allergies: list[str], disliked: list[st
 
     client = AsyncAnthropic(api_key=settings.anthropic_api_key)
     try:
-        response = await client.messages.create(
-            model=settings.ai_model,
-            max_tokens=1500,
-            system=_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_message}],
-        )
+        async with _concurrency_limiter:
+            response = await client.messages.create(
+                model=settings.ai_model,
+                max_tokens=1500,
+                system=_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": user_message}],
+            )
     except Exception as exc:  # noqa: BLE001 - любая ошибка API превращается в понятный ответ пользователю
         raise AIRecipeError("Не получилось связаться с сервисом генерации рецептов") from exc
 
