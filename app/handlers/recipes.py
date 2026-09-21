@@ -3,7 +3,13 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from app.database.models import MealType
-from app.database.repo import get_recipe, list_recipes_by_meal, search_recipes
+from app.database.repo import (
+    create_ai_recipe,
+    get_or_create_user,
+    get_recipe,
+    list_recipes_by_meal,
+    search_recipes,
+)
 from app.database.session import session_scope
 from app.handlers.states import RecipeSearchStates
 from app.keyboards.recipes import (
@@ -12,6 +18,7 @@ from app.keyboards.recipes import (
     recipe_list_keyboard,
     recipe_step_keyboard,
 )
+from app.services.ai_recipe_service import AIRecipeError, generate_recipe
 from app.services.recipe_service import format_recipe_intro, format_step
 
 router = Router(name="recipes")
@@ -49,25 +56,63 @@ async def show_recipes_by_category(callback: CallbackQuery) -> None:
 @router.callback_query(F.data == "recipes:search")
 async def ask_search_query(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(RecipeSearchStates.waiting_query)
-    await callback.message.edit_text("Напиши название блюда или продукт, который хочешь найти:")
+    await callback.message.edit_text(
+        "Напиши, что хочешь съесть — название блюда, продукт, который есть дома, "
+        "или просто опиши словами. Если готового рецепта в базе нет — сам придумаю."
+    )
     await callback.answer()
 
 
 @router.message(RecipeSearchStates.waiting_query)
 async def handle_search_query(message: Message, state: FSMContext) -> None:
+    query = message.text or ""
+
     async with session_scope() as session:
-        recipes = await search_recipes(session, message.text or "")
+        recipes = await search_recipes(session, query)
 
-    await state.clear()
-
-    if not recipes:
-        await message.answer(
-            "Ничего не нашёл 🤷 Попробуй другой запрос или посмотри категории.",
-            reply_markup=meal_categories_keyboard(),
-        )
+    if recipes:
+        await state.clear()
+        await message.answer("Нашёл вот что:", reply_markup=recipe_list_keyboard(recipes))
         return
 
-    await message.answer("Нашёл вот что:", reply_markup=recipe_list_keyboard(recipes))
+    await message.answer("В базе такого не нашёл, спрошу у ИИ, минутку… 🤖")
+
+    async with session_scope() as session:
+        user = await get_or_create_user(
+            session,
+            telegram_id=message.from_user.id,
+            username=message.from_user.username,
+            full_name=message.from_user.full_name,
+        )
+        try:
+            draft = await generate_recipe(
+                query, allergies=user.allergies, disliked=user.disliked_products
+            )
+        except AIRecipeError as exc:
+            await state.clear()
+            await message.answer(
+                f"⚠️ {exc}. Попробуй переформулировать запрос или посмотри категории.",
+                reply_markup=meal_categories_keyboard(),
+            )
+            return
+
+        recipe = await create_ai_recipe(
+            session,
+            title=draft.title,
+            description=draft.description,
+            meal_type=MealType(draft.meal_type),
+            calories=draft.calories,
+            cook_minutes=draft.cook_minutes,
+            servings=draft.servings,
+            ingredients=draft.ingredients,
+            steps=draft.steps,
+        )
+
+    await state.clear()
+    await message.answer(
+        format_recipe_intro(recipe) + "\n\n<i>Рецепт придуман ИИ по твоему запросу 🤖</i>",
+        reply_markup=recipe_intro_keyboard(recipe.id),
+    )
 
 
 @router.callback_query(F.data.startswith("recipes:open:"))

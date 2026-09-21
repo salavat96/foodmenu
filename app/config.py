@@ -8,5 +8,8 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./foodmenu.db"
     default_timezone: str = "Europe/Moscow"
 
+    anthropic_api_key: str | None = None
+    ai_model: str = "claude-haiku-4-5-20251001"
+
 
 settings = Settings()

@@ -93,6 +93,12 @@ class Recipe(Base):
     cook_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     servings: Mapped[int] = mapped_column(Integer, default=2)
 
+    # "curated" — из проверенной базы, участвует в подборе меню и в списках категорий.
+    # "ai" — сгенерирован по свободному запросу пользователя через API; показывается
+    # только тому, кто его запросил, и не участвует в автогенерации меню, так как
+    # его аллергены не гарантированы.
+    source: Mapped[str] = mapped_column(String(16), default="curated")
+
     ingredients: Mapped[list["Ingredient"]] = relationship(
         back_populates="recipe", cascade="all, delete-orphan", order_by="Ingredient.order_index"
     )

@@ -10,10 +10,12 @@ from app.database.models import (
     BudgetLevel,
     DietType,
     Goal,
+    Ingredient,
     MealType,
     MenuEntry,
     MenuPlan,
     Recipe,
+    RecipeStep,
     ReminderSetting,
     User,
 )
@@ -74,7 +76,7 @@ async def list_recipes_by_meal(
 ) -> list[Recipe]:
     stmt = (
         select(Recipe)
-        .where(Recipe.meal_type == meal_type)
+        .where(Recipe.meal_type == meal_type, Recipe.source == "curated")
         .options(selectinload(Recipe.ingredients), selectinload(Recipe.steps))
     )
     result = await session.execute(stmt)
@@ -109,6 +111,38 @@ async def list_recipes_by_meal(
     return filtered
 
 
+async def create_ai_recipe(
+    session: AsyncSession,
+    *,
+    title: str,
+    description: str,
+    meal_type: MealType,
+    calories: int | None,
+    cook_minutes: int | None,
+    servings: int,
+    ingredients: list[tuple[str, str]],
+    steps: list[str],
+) -> Recipe:
+    recipe = Recipe(
+        title=title,
+        description=description,
+        meal_type=meal_type,
+        calories=calories,
+        cook_minutes=cook_minutes,
+        servings=servings,
+        source="ai",
+    )
+    for index, (name, amount) in enumerate(ingredients):
+        recipe.ingredients.append(Ingredient(name=name, amount=amount, order_index=index))
+    for index, text in enumerate(steps, start=1):
+        recipe.steps.append(RecipeStep(step_number=index, text=text))
+
+    session.add(recipe)
+    await session.commit()
+    await session.refresh(recipe)
+    return recipe
+
+
 async def get_recipe(session: AsyncSession, recipe_id: int) -> Recipe | None:
     stmt = (
         select(Recipe)
@@ -120,7 +154,11 @@ async def get_recipe(session: AsyncSession, recipe_id: int) -> Recipe | None:
 
 
 async def search_recipes(session: AsyncSession, query: str) -> list[Recipe]:
-    stmt = select(Recipe).options(selectinload(Recipe.ingredients), selectinload(Recipe.steps))
+    stmt = (
+        select(Recipe)
+        .where(Recipe.source == "curated")
+        .options(selectinload(Recipe.ingredients), selectinload(Recipe.steps))
+    )
     result = await session.execute(stmt)
     recipes = list(result.scalars().all())
 

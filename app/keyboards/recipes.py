@@ -13,7 +13,7 @@ def meal_categories_keyboard() -> InlineKeyboardMarkup:
             (MealType.dinner, "🍽 Ужины"),
         ]
     ]
-    buttons.append([InlineKeyboardButton(text="🔎 Найти по названию/продукту", callback_data="recipes:search")])
+    buttons.append([InlineKeyboardButton(text="✍️ Написать, что хочу съесть", callback_data="recipes:search")])
     buttons.append([InlineKeyboardButton(text="⬅️ В главное меню", callback_data="menu:main")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
