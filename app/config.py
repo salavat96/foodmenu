@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     default_timezone: str = "Europe/Moscow"
 
     anthropic_api_key: str | None = None
-    ai_model: str = "claude-haiku-4-5-20251001"
+    ai_model: str = "claude-haiku-4-5"
     ai_max_concurrent_requests: int = 5
     ai_daily_limit_per_user: int = 10
 
